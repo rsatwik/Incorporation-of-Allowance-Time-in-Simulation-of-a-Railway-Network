@@ -1,0 +1,221 @@
+# This code requires the following input files:
+
+# loop.txt unscheduled.txt TraversalDetails.txt NumTracks.csv (Number of tracks information obtained from CRIS) 
+# Please point to the respective directories wherever they are imported 
+# Also timetable-not-detailed.csv is required 
+
+import pandas as pd
+import sys
+import json
+import sys
+import time 
+from tqdm import tqdm 
+import os
+
+# Basically here what more is to be done is to add the actual halt given in the 
+# Unscheduled.txt file.........
+
+
+############# Added by Bhushan Deo ######################
+inputPath = "../common/"
+infraPath = "simulator_input/"
+sim_out = "simulator_output/"
+postprocessPath = "postprocessed_files/"
+valdir = "validation/"
+#########################################################
+
+# The overtake information is generated from the post processing code itself 
+
+# print("\nGetting the overtake information...")
+# print('\nReading loop.txt')
+# with open(infraPath+'/loop.txt') as loop_file:
+#     loop=loop_file.readlines()[2:]
+# loopDict={}
+# for l in loop:
+#     row=l.split()
+#     loopDict[row[0]]=row[3].replace('"','')
+
+# print('\nReading unscheduled.txt')
+# print('\nAlso getting the actual halt that was given in unscheduled.txt...')
+# unsched={}
+# dir_dict={}
+# with open(infraPath+'/unscheduled.txt') as unsch:
+#     unscheduled_list = unsch.readlines()
+# unscheduled_list = unscheduled_list[2:]
+# train_scheduled_dict = {}
+# for line in unscheduled_list:
+#     row=line.split()
+#     unsched[row[0]] = row[2]
+#     dir_dict[row[0]] = row[1]
+#     dic = {}
+#     for i,r in enumerate(row[11:]):
+#         if(i%2==0):
+#             dic[r] = float(dic[row[11:][i+1]])
+#     train_scheduled_dict[row[0]] = dic                             # A dict of dic train and station name are the keys and duration is the value 
+
+
+
+
+# print('\nReading Traversal Details')
+# with open(sim_out+'/TraversalDetails.txt') as TD_file:
+#     TD=TD_file.readlines()
+# currentTrain = 0
+# output_file=open(postprocessPath+'/timetableNotDetailed.csv','w')
+# output_file.write('trainno,dir,stn,arr,dep,halt\n')
+# for row in TD:
+#     if 'Printing' in row:
+#         currentTrain = row.split()[-1]
+#         train_dir=dir_dict[currentTrain]
+#     else:
+#         temp = row.split()
+#         if temp[2] in loopDict.keys():
+#             output_file.write(currentTrain+','+train_dir+','+loopDict[temp[2]]+','+temp[11]+','+temp[14]+','+str(float(temp[14])-float(temp[11]))+'\n')
+
+
+
+print("Just Reading Timetable Not Detailed and computing overtakes.....")
+
+import multiprocessing as mp
+import pandas as pd
+from tqdm import tqdm
+import sys
+
+# this function finds all overtakes at a given stn
+# returns overtakes as dataframe with columns=['Overtaking_T.No.','Dir','stn_code','arr','dep','H.Time','Overtaken_T.No.']
+def find_overtakes_station(stn_code):
+    global overtake_data_all
+    tt_data_stn=tt_data_stn_all[tt_data_stn_all['stn']==stn_code].copy()
+    # print('\n--- '+str(len(tt_data_stn))+' trains go through station: '+stn_code)
+    # print(stn_code)
+    # tt_data_stn[['T.No.',,arr,dep,H.Time]] = tt_data_stn[['T.No.','arr','dep','H.Time']].apply(to_numeric)
+    overtake_data = pd.DataFrame(columns=['trainno','dir','stn','arr','dep','halt','A.T.No.'])
+    for index, tt_row in tt_data_stn.iterrows():
+        # Train represented by tt_data_stn overtakes tt_row
+        overtakes = tt_data_stn[(tt_row['dir'] == tt_data_stn['dir']) &
+                                (tt_row['arr'] < tt_data_stn['arr'])
+                                & (tt_row['dep'] > tt_data_stn['dep'])].copy()
+        if not overtakes.empty:
+            # all these trains were overtaken by tt_row's train no.
+            overtakes.loc[:, 'A.T.No.'] = int(tt_row['trainno'])
+            # overtakes.loc[:, 'Loop'] = stn_code
+            overtake_data = overtake_data.append(
+                # overtakes[['T.No.', 'A.T.No.']], ignore_index=True)
+                overtakes, ignore_index=True)
+    overtake_data = overtake_data.rename(columns={'trainno': 'Overtaking_T.No.', 'A.T.No.': 'Overtaken_T.No.','stn':'stn_code'})
+    return overtake_data
+
+# Main code starts here
+stn_data=pd.read_csv(infraPath+'/station.txt',delimiter=" ",names=['name','start','end','entry'],header=0)[['name']]
+stn_code_list=stn_data.name.to_list()
+# read the intermediate file created by generate-timetable-not-detailed.php
+tt_data_stn_all = pd.read_csv(postprocessPath+'timetable-not-detailed.csv')
+
+overtake_data_all = pd.DataFrame(columns=['Overtaking_T.No.','dir','stn_code','arr','dep','halt','Overtaken_T.No.'])
+print('Finding overtakes ...')
+with mp.Pool(mp.cpu_count()) as p:
+    result=list(tqdm(p.imap(find_overtakes_station,stn_code_list),total=len(stn_code_list)))
+    overtake_data_all=overtake_data_all.append(result,ignore_index=True)
+    p.close()
+    p.join()
+
+# print(overtake_data_all)
+# overtake_data_all.to_csv(postprocessPath+"/overtakes.csv",index=False)
+
+
+
+
+# overtakes.csv was generated by find-overtakes-from-traversal-mp.py
+# ov_data=pd.read_csv(postprocessPath+"/overtakes.csv")
+# train_wise_ov={}
+
+# # for each train no. find how many trains have overtaken it
+# # check relevant train in separate function
+# for train in ov_data['Overtaken_T.No.'].unique():
+#     if str(train)[0]=='2':
+#         train_ov_data=ov_data[train==ov_data['Overtaken_T.No.']].copy()[['Overtaking_T.No.','stn_code']]
+#         if len(train_ov_data)>0:
+#             # this dict contains a list of pairs of overtaking trains and station code
+#             train_ov_data=train_ov_data.to_dict('records')
+#             train_wise_ov[str(int(train))]=str(len(train_ov_data))
+
+#print(train_wise_ov)
+
+# with open(postprocessPath+'train_wise_overtakes.txt', 'w') as file:
+#      file.write(json.dumps(train_wise_ov).replace('"','\''))
+
+print("\nFound out overtakes...")
+
+overtake_data_all['Overtaken_T.No.'] = overtake_data_all['Overtaken_T.No.'].astype(str).astype(float).astype(int).astype(str)
+overtake_data_all['Overtaking_T.No.'] = overtake_data_all['Overtaking_T.No.'].astype(str)
+overtake_data_all['stn_code'] = overtake_data_all['stn_code'].astype(str)
+
+
+
+start_time = time.time()
+folder_path = os.getcwd()
+loop_file = open(infraPath+'/loop.txt').readlines()[2:]
+loop_list_dict = {l.split()[0]:[l.split()[3],l.split()[1] + ' '+l.split()[2]] for l in loop_file}
+# print(loop_list_dict)
+unsch = open(infraPath+'/unscheduled.txt').readlines()[2:]
+train_scheduled_dict = {}
+for u in unsch:
+    row = u.split()
+    dic = {}
+    for i,r in enumerate(row[11:]):
+        if(i%2==0):
+            dic[r] = float(row[11:][i+1])
+    train_scheduled_dict[row[0]] = dic
+priority_dict = {un.split()[0]:un.split()[6] for un in unsch}
+
+df = pd.read_fwf(sim_out+'/TraversalDetails.txt',header=None)
+loop_df = pd.DataFrame(columns = ['Loop Number','Station','Train','Halt Duration (minutes)'])
+
+df.columns = ['0','1','2']
+index_list = df.index[df['0']=='Printing'].tolist()
+dictionary_list = []
+numtracksdf = pd.read_csv(inputPath+'/NumTracks.csv')                 # Number of tracks file 
+numtracksdf = numtracksdf[['STATION','UPDATED NO. OF TRACKS']]
+numtrack_dict = dict(numtracksdf.set_index('STATION').T.to_dict('list'))
+for l,i in tqdm(enumerate(index_list)):
+    try:
+        train_number = str(df[['2']].iloc[i]).split()[2]
+        
+        if(train_number[0]!='2' or i==index_list[-1]):
+            continue
+        else:
+            dictionary = {}
+            i_list = [k for k in range(int(i+1),int(index_list[l+1]))]
+
+            curr_df_total = df.loc[i_list]
+
+            curr_df = curr_df_total['1'].str.split(' ',1,expand=True)
+            curr_df.columns = ['0','1']
+
+            in_list = curr_df[curr_df['0'].isin(list(loop_list_dict))].index.values.tolist()
+            curr_df_total = curr_df_total.loc[in_list]
+            curr_df_total = curr_df_total['2'].str.split(' ',10,expand=True)
+            curr_df_total.columns = ['0','1','2','3','4','5','6','7','8','9','10']
+            
+            index = curr_df_total[abs(pd.to_numeric(curr_df_total['7'])-pd.to_numeric(curr_df_total['10']))>20].index.values.tolist()
+            if(index):
+                loop_numbers = [k.split()[0] for k in df.iloc[index]['1'].tolist()]
+                stations = [loop_list_dict[p][0] for p in loop_numbers]
+                loop_type = [loop_list_dict[p][1] for p in loop_numbers]
+                halt_duration = [abs(int(float(k.split()[7]))-int(float(k.split()[10]))) for k in df.iloc[index]['2'].tolist()]
+                halt_duration = [time.strftime('%H:%M', time.gmtime(h*60)) for h in halt_duration]
+                overtakes = [len(overtake_data_all[(overtake_data_all['Overtaken_T.No.']==train_number) & (overtake_data_all['stn_code']==s)]) for s in stations]
+                num_tracks = [numtrack_dict[s][0] for s in stations]
+    #             print(stations)
+                for o,l in enumerate(loop_numbers):
+                    if(stations[o] in train_scheduled_dict[train_number]):
+                        uhalt = train_scheduled_dict[train_number][stations[o]]
+                    else:
+                        uhalt = 0
+
+                    dictionary = {'Train':train_number,'Train_priority':priority_dict[train_number],'Loop':l,'Station':stations[o],'Loop type':loop_type[o],'Halt_Duration':halt_duration[o],'Overtakes':overtakes[o],'Num_Tracks':num_tracks[o],'Unsch_Halt':uhalt}
+                dictionary_list.append(dictionary)
+    except:
+        print("Got error for {}".format(train_number))
+final_df = pd.DataFrame.from_dict(dictionary_list)
+final_df.to_csv(valdir+'Excess_Halting_Analysis.csv',index=False)
+# print("Time required is {}".format(time.time()-start_time))
